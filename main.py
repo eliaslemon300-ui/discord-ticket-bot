@@ -23,12 +23,16 @@ async def on_member_join(member):
         role = member.guild.get_role(JOIN_ROLE)
         if role:
             await member.add_roles(role)
-            print(f'🎉 Assigned role {role.name} to {member.name}')
+            print(f"🔔 Role '{role.name}' assigned to {member.name}")
 
 @bot.command()
 async def setup_ticket(ctx):
     if ADMIN_ROLE in [role.id for role in ctx.author.roles]:
-        button = discord.ui.Button(label="📩 Create Ticket", style=discord.ButtonStyle.primary, custom_id="ticket_button")
+        button = discord.ui.Button(
+            label="📩 Create Ticket", 
+            style=discord.ButtonStyle.primary, 
+            custom_id="ticket_button"
+        )
         view = discord.ui.View()
         view.add_item(button)
 
@@ -39,28 +43,12 @@ async def setup_ticket(ctx):
             await chan.set_permissions(interaction.user, read_messages=True, send_messages=True)
             admin_role = guild.get_role(ADMIN_ROLE)
             await chan.set_permissions(admin_role, read_messages=True, send_messages=True)
-            await interaction.response.send_message(f"Opened a ticket: {chan.mention}", ephemeral=True)
-            await chan.send(f"{interaction.user.mention}, you have a new ticket!")
+            await interaction.response.send_message(f"✅ Ticket erstellt: {chan.mention}", ephemeral=True)
+            await chan.send(f"{interaction.user.mention}, dein Ticket wurde erstellt!")
 
         button.callback = button_callback
-        await ctx.send("Click the button to open a ticket:", view=view)
+        await ctx.send("Klicke auf den Button, um ein Ticket zu erstellen:", view=view)
     else:
-        await ctx.send("❌ You don't have permission to use this!")
+        await ctx.send("❌ Du hast keine Berechtigung für diesen Befehl.")
 
-# 🔧 Keep-alive Flask Trick for Render:
-from flask import Flask
-from threading import Thread
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "I'm alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-Thread(target=run).start()
-
-# ▶️ Bot starten
 bot.run(TOKEN)
