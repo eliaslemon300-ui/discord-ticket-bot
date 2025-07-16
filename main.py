@@ -8,14 +8,14 @@ ADMIN_ROLE = 1395160172695130152
 JOIN_ROLE = 1395166044762542222
 
 intents = discord.Intents.default()
-intents.message_content = True  # Fix für !-Befehle
+intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f'Bot is online as {bot.user}')
+    print(f'✅ Bot is online as {bot.user}')
 
 @bot.event
 async def on_member_join(member):
@@ -23,7 +23,7 @@ async def on_member_join(member):
         role = member.guild.get_role(JOIN_ROLE)
         if role:
             await member.add_roles(role)
-            print(f'Assigned role {role.name} to {member.name}')
+            print(f'🎉 Assigned role {role.name} to {member.name}')
 
 @bot.command()
 async def setup_ticket(ctx):
@@ -45,4 +45,22 @@ async def setup_ticket(ctx):
         button.callback = button_callback
         await ctx.send("Click the button to open a ticket:", view=view)
     else:
-        await ctx.send("You do not have permission to run this command.")
+        await ctx.send("❌ You don't have permission to use this!")
+
+# 🔧 Keep-alive Flask Trick for Render:
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I'm alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+Thread(target=run).start()
+
+# ▶️ Bot starten
+bot.run(TOKEN)
