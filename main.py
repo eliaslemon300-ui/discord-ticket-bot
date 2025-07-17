@@ -1,122 +1,144 @@
 import discord
 from discord.ext import commands
+from discord import app_commands, Interaction, SelectOption
 import os
 
-TOKEN = os.getenv("TOKEN")
+# 🔐 Token from environment variable
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+
+# ⚙️ IDs
 GUILD_ID = 1394312686090715248
-JOIN_ROLE = 1395166044762542222
-ADMIN_ROLE_ID = 1395160172695130152
 FREE_ROLE_ID = 1395166044762542222
 PREMIUM_ROLE_ID = 1395166045974560829
+JOIN_ROLE_ID = 1395166065675337760
 
+# Ticket Zähler
+ticket_counter = 0
+
+# Intents
 intents = discord.Intents.default()
-intents.message_content = True
 intents.guilds = True
 intents.members = True
+intents.messages = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# --- Dropdown zum Ticket-Erstellen ---
 class TicketDropdown(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="Buy Coins", description="Order coins now"),
-            discord.SelectOption(label="General Help", description="Ask general questions"),
-            discord.SelectOption(label="Bug Report", description="Report an issue or bug"),
-            discord.SelectOption(label="Partnership", description="Request a partnership")
+            SelectOption(label="BuyCoins", description="Buy FUT coins"),
+            SelectOption(label="General Help", description="Ask general questions"),
+            SelectOption(label="Bug Report", description="Report a bug"),
+            SelectOption(label="Partnership", description="Partner with us"),
         ]
-        super().__init__(placeholder="📩 Select a ticket category", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="📩 Choose a ticket category", options=options)
 
-    async def callback(self, interaction: discord.Interaction):
-        category_name = self.values[0].replace(" ", "")
+    async def callback(self, interaction: Interaction):
+        global ticket_counter
+        user = interaction.user
+        category_name = self.values[0]
+
+        ticket_counter += 1
+        ticket_name = f"ticket-{ticket_counter:03d}"
+
         guild = interaction.guild
 
-        if self.values[0] == "Buy Coins":
-            form_fields = "Please provide the following:\n- Your EA Account Email\n- Platform\n- Coin Amount\n- Backup Codes (if available)"
+        # Berechtigungen
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True),
+            guild.get_role(PREMIUM_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
+        }
+
+        # Kategorie erstellen oder holen
+        category = discord.utils.get(guild.categories, name=category_name)
+        if not category:
+            category = await guild.create_category(name=category_name, overwrites={
+                guild.default_role: discord.PermissionOverwrite(view_channel=False)
+            })
+
+        # Ticket-Channel erstellen
+        ticket_channel = await guild.create_text_channel(name=ticket_name, overwrites=overwrites, category=category)
+
+        # Embed im Ticket
+        embed = discord.Embed(title=f"📩 New Ticket - {category_name}", color=0x00ff00)
+        if category_name == "BuyCoins":
+            embed.description = "Please provide your **account name**, **platform**, **coin amount** and backup codes (if needed)."
         else:
-            form_fields = "Please describe your issue or request in detail."
+            embed.description = f"Hello {user.mention}, our support will assist you shortly."
 
-        # Check if user has premium role
-        is_premium = PREMIUM_ROLE_ID in [role.id for role in interaction.user.roles]
-        is_free = FREE_ROLE_ID in [role.id for role in interaction.user.roles]
+        embed.set_footer(text="Click the 🔒 button to close this ticket.")
 
-        if is_premium:
-            category = discord.utils.get(guild.categories, name=f"{category_name}Premium")
-            log_channel = discord.utils.get(guild.text_channels, name="ticket-support-premium")
-        else:
-            category = discord.utils.get(guild.categories, name=category_name)
-            log_channel = discord.utils.get(guild.text_channels, name="ticket-support")
+        view = CloseButton()
+        await ticket_channel.send(content=f"{user.mention} <@&{PREMIUM_ROLE_ID}>", embed=embed, view=view)
 
-        if category is None:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                guild.get_role(ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True, send_messages=True)
-            }
-            category = await guild.create_category(category_name if not is_premium else f"{category_name}Premium", overwrites=overwrites)
+        # Log Channel finden oder erstellen
+        log_name = "ticket-support-premium" if PREMIUM_ROLE_ID in [r.id for r in user.roles] else "ticket-support"
+        log_channel = discord.utils.get(guild.text_channels, name=log_name)
+        if not log_channel:
+            logs_category = discord.utils.get(guild.categories, name="Logs")
+            if not logs_category:
+                logs_category = await guild.create_category("Logs")
+            log_channel = await guild.create_text_channel(log_name, category=logs_category)
 
-        channel = await category.create_text_channel(name=f"ticket-{interaction.user.name}")
+        await log_channel.send(f"📨 {user.mention} opened `{category_name}` ticket: {ticket_channel.mention}")
+        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
 
-        await channel.send(
-            f"🎫 Ticket opened by {interaction.user.mention}\n\n**Category:** {self.values[0]}\n\n{form_fields}",
-            view=CloseTicketView()
-        )
-
-        if log_channel:
-            await log_channel.send(f"📨 Ticket created by {interaction.user.mention}: {channel.mention}")
-
-        await interaction.response.send_message(f"✅ Ticket created: {channel.mention}", ephemeral=True)
-
-
-class TicketView(discord.ui.View):
+# --- Close Button ---
+class CloseButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(TicketDropdown())
 
-class CloseTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="❌ Close Ticket", style=discord.ButtonStyle.danger)
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Close Ticket 🔒", style=discord.ButtonStyle.danger)
+    async def close_ticket(self, interaction: Interaction, button: discord.ui.Button):
         await interaction.channel.delete()
 
+# --- Beim Start: Dropdown-Panel automatisch senden ---
 @bot.event
 async def on_ready():
-    print(f"✅ Bot is online as {bot.user}")
-    guild = bot.get_guild(GUILD_ID)
-    channel = discord.utils.get(guild.text_channels, name="create-ticket")
-    if channel:
-        await channel.purge(limit=10)
-        await channel.send(embed=discord.Embed(
-            title="Need Help? 🎟️",
-            description="Select a category to create a support ticket.",
-            color=discord.Color.blurple()
-        ), view=TicketView())
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f"✅ Bot is ready: {bot.user}")
 
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+
+    channel = discord.utils.get(guild.text_channels, name="create-ticket")
+    if not channel:
+        tickets_cat = discord.utils.get(guild.categories, name="Tickets") or await guild.create_category("Tickets")
+        channel = await guild.create_text_channel("create-ticket", category=tickets_cat)
+
+    await channel.purge(limit=5)
+    view = discord.ui.View()
+    view.add_item(TicketDropdown())
+
+    embed = discord.Embed(
+        title="🎫 Create a Ticket",
+        description="Select a category below to open a private support ticket.",
+        color=discord.Color.blurple()
+    )
+
+    await channel.send(embed=embed, view=view)
+
+# --- Join-Event: Automatisch Rolle geben ---
 @bot.event
 async def on_member_join(member):
-    if member.guild.id == GUILD_ID:
-        role = member.guild.get_role(JOIN_ROLE)
-        if role:
-            await member.add_roles(role)
-            print(f"👤 Assigned role {role.name} to {member.name}")
+    role = discord.utils.get(member.guild.roles, id=JOIN_ROLE_ID)
+    if role:
+        await member.add_roles(role)
+        print(f"👤 Assigned join role to {member.name}")
 
-@bot.tree.command(name="ticket", description="Send the ticket menu again")
-async def ticket_command(interaction: discord.Interaction):
-    await interaction.response.send_message("Select a category to create a support ticket:", view=TicketView(), ephemeral=True)
+# --- Slash Command: /help ---
+@bot.tree.command(name="help", description="Show help")
+async def help_command(interaction: Interaction):
+    await interaction.response.send_message("Use `/ticket` or go to #create-ticket to open a support ticket.", ephemeral=True)
 
-@bot.tree.command(name="close", description="Close the current ticket channel")
-async def close_command(interaction: discord.Interaction):
+# --- Slash Command: /close ---
+@bot.tree.command(name="close", description="Close this ticket")
+async def close_command(interaction: Interaction):
     await interaction.channel.delete()
-
-@bot.tree.command(name="help", description="Show help info")
-async def help_command(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        "**Commands:**\n"
-        "`/ticket` – Show the ticket menu\n"
-        "`/close` – Close the current ticket\n"
-        "`/help` – Show this message",
-        ephemeral=True
-    )
 
 bot.run(TOKEN)
